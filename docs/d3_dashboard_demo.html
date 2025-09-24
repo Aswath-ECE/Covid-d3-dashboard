@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>D3 Dashboard Demo</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .chart { display:inline-block; vertical-align: top; margin-right: 30px; }
+    .tooltip { position: absolute; background: rgba(0,0,0,0.75); color: #fff; padding:6px 8px; border-radius:4px; pointer-events:none; font-size:13px; }
+    select { padding:6px; font-size:14px; }
+    #controls { margin-bottom: 10px; }
+    .map-rect { stroke: #fff; stroke-width:1px; }
+  </style>
+</head>
+<body>
+  <h1>D3 Dashboard Demo — Simplified COVID dataset</h1>
+  <div id="controls">
+    <label for="stateSelect">Filter state:</label>
+    <select id="stateSelect">
+      <option value="All">All</option>
+    </select>
+    <label style="margin-left:20px;">Time range:</label>
+    <select id="timeSelect">
+      <option value="All">All</option>
+      <option value="2020-05-01">May 2020</option>
+      <option value="2020-06-01">June 2020</option>
+      <option value="2020-07-01" selected>July 2020</option>
+    </select>
+  </div>
+  <div id="dashboard">
+    <div id="bar" class="chart"></div>
+    <div id="line" class="chart"></div>
+    <div id="bubble" class="chart"></div>
+    <div id="map" class="chart"></div>
+  </div>
+  <div id="notes" style="margin-top:18px;">Open the browser console to see events when charts are linked (click a map region to filter charts).</div>
+  <div class="tooltip" id="tooltip" style="opacity:0;"></div>
+
+<script>
+const data = 
+[{"State": "Maharashtra", "Date": "2020-05-01", "Cases": 12000, "Deaths": 500, "Population": 112000000}, {"State": "Tamil Nadu", "Date": "2020-05-01", "Cases": 8000, "Deaths": 300, "Population": 76000000}, {"State": "Delhi", "Date": "2020-05-01", "Cases": 7000, "Deaths": 400, "Population": 19000000}, {"State": "Kerala", "Date": "2020-05-01", "Cases": 3000, "Deaths": 50, "Population": 35000000}, {"State": "Karnataka", "Date": "2020-05-01", "Cases": 4000, "Deaths": 100, "Population": 64000000}, {"State": "Maharashtra", "Date": "2020-06-01", "Cases": 50000, "Deaths": 2000, "Population": 112000000}, {"State": "Tamil Nadu", "Date": "2020-06-01", "Cases": 25000, "Deaths": 800, "Population": 76000000}, {"State": "Delhi", "Date": "2020-06-01", "Cases": 20000, "Deaths": 700, "Population": 19000000}, {"State": "Kerala", "Date": "2020-06-01", "Cases": 7000, "Deaths": 150, "Population": 35000000}, {"State": "Karnataka", "Date": "2020-06-01", "Cases": 9000, "Deaths": 200, "Population": 64000000}, {"State": "Maharashtra", "Date": "2020-07-01", "Cases": 150000, "Deaths": 6000, "Population": 112000000}, {"State": "Tamil Nadu", "Date": "2020-07-01", "Cases": 60000, "Deaths": 2500, "Population": 76000000}, {"State": "Delhi", "Date": "2020-07-01", "Cases": 45000, "Deaths": 2000, "Population": 19000000}, {"State": "Kerala", "Date": "2020-07-01", "Cases": 12000, "Deaths": 400, "Population": 35000000}, {"State": "Karnataka", "Date": "2020-07-01", "Cases": 18000, "Deaths": 700, "Population": 64000000}];
+
+const states = Array.from(new Set(data.map(d=>d.State)));
+const stateSelect = d3.select("#stateSelect");
+stateSelect.selectAll("option.state-option")
+  .data(states).enter()
+  .append("option")
+  .attr("class","state-option")
+  .attr("value", d=>d)
+  .text(d=>d);
+
+const w = 420, h = 260, margin = {top:30, right:20, bottom:50, left:60};
+
+const svgBar = d3.select("#bar").append("svg").attr("width", w).attr("height", h);
+const svgLine = d3.select("#line").append("svg").attr("width", w).attr("height", h);
+const svgBubble = d3.select("#bubble").append("svg").attr("width", w).attr("height", h);
+const svgMap = d3.select("#map").append("svg").attr("width", w).attr("height", h/1.2);
+
+const tooltip = d3.select("#tooltip");
+
+function renderCharts(filterState, timeFilter) {
+  let filtered = data.slice();
+  if (timeFilter && timeFilter !== "All") filtered = filtered.filter(d=>d.Date === timeFilter);
+  let agg = Array.from(d3.rollup(filtered, v => ({ Cases: d3.sum(v, d=>+d.Cases), Deaths: d3.sum(v, d=>+d.Deaths), Population: v[0].Population }), d=>d.State), ([k,v])=>({ State: k, Cases: v.Cases, Deaths: v.Deaths, Population: v.Population }));
+  if (filterState && filterState !== "All") agg = agg.filter(d=>d.State === filterState);
+
+  // BAR
+  svgBar.selectAll("*").remove();
+  const x = d3.scaleBand().domain(agg.map(d=>d.State)).range([margin.left, w-margin.right]).padding(0.2);
+  const y = d3.scaleLinear().domain([0, d3.max(agg, d=>d.Cases) || 1]).nice().range([h - margin.bottom, margin.top]);
+  svgBar.append("g").attr("transform", `translate(0,${h-margin.bottom})`).call(d3.axisBottom(x)).selectAll("text").attr("transform","rotate(-30)").style("text-anchor","end");
+  svgBar.append("g").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(y));
+  svgBar.selectAll(".bar").data(agg).enter().append("rect")
+    .attr("class","bar")
+    .attr("x", d=>x(d.State))
+    .attr("y", d=>y(d.Cases))
+    .attr("width", x.bandwidth())
+    .attr("height", d=>y(0)-y(d.Cases))
+    .on("mouseover", (event,d)=>{ tooltip.style("opacity",1).html(`<strong>${d.State}</strong><br/>Cases: ${d.Cases}<br/>Deaths: ${d.Deaths}`).style("left",(event.pageX+10)+"px").style("top",(event.pageY+10)+"px"); })
+    .on("mouseout", ()=>{ tooltip.style("opacity",0); });
+
+  // LINE
+  svgLine.selectAll("*").remove();
+  let lineData = filtered;
+  if (filterState && filterState !== "All") lineData = filtered.filter(d=>d.State === filterState);
+  const series = Array.from(d3.rollup(lineData, v=>d3.sum(v, d=>+d.Cases), d=>d.Date), ([k,v])=>({Date:k, Cases:v})).sort((a,b)=>new Date(a.Date)-new Date(b.Date));
+  const xL = d3.scaleTime().domain(d3.extent(series, d=>new Date(d.Date))).range([margin.left, w-margin.right]);
+  const yL = d3.scaleLinear().domain([0, d3.max(series, d=>d.Cases) || 1]).nice().range([h-margin.bottom, margin.top]);
+  const line = d3.line().x(d=>xL(new Date(d.Date))).y(d=>yL(d.Cases));
+  svgLine.append("g").attr("transform", `translate(0,${h-margin.bottom})`).call(d3.axisBottom(xL).ticks(4));
+  svgLine.append("g").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(yL));
+  svgLine.append("path").datum(series).attr("fill","none").attr("stroke","#2a9d8f").attr("stroke-width",2).attr("d", line);
+  svgLine.selectAll("dot").data(series).enter().append("circle").attr("cx", d=>xL(new Date(d.Date))).attr("cy", d=>yL(d.Cases)).attr("r",4)
+    .on("mouseover", (event,d)=>{ tooltip.style("opacity",1).html(`<strong>${d.Date}</strong><br/>Cases: ${d.Cases}`).style("left",(event.pageX+10)+"px").style("top",(event.pageY+10)+"px"); })
+    .on("mouseout", ()=>{ tooltip.style("opacity",0); });
+
+  // BUBBLE
+  svgBubble.selectAll("*").remove();
+  const xB = d3.scaleLinear().domain([0, d3.max(agg, d=>d.Cases) || 1]).range([margin.left, w-margin.right]);
+  const yB = d3.scaleLinear().domain([0, d3.max(agg, d=>d.Deaths) || 1]).range([h-margin.bottom, margin.top]);
+  const r = d3.scaleSqrt().domain([0, d3.max(agg, d=>d.Population) || 1]).range([4,40]);
+  svgBubble.selectAll("circle").data(agg).enter().append("circle")
+    .attr("cx", d=>xB(d.Cases))
+    .attr("cy", d=>yB(d.Deaths))
+    .attr("r", d=>r(d.Population))
+    .attr("fill", "#e76f51").attr("opacity",0.7)
+    .on("mouseover", (event,d)=>{ tooltip.style("opacity",1).html(`<strong>${d.State}</strong><br/>Cases: ${d.Cases}<br/>Deaths: ${d.Deaths}`).style("left",(event.pageX+10)+"px").style("top",(event.pageY+10)+"px"); })
+    .on("mouseout", ()=>{ tooltip.style("opacity",0); });
+
+  // MAP mockup
+  svgMap.selectAll("*").remove();
+  const cvals = agg.map(d=> (d.Cases/d.Population)*100000 );
+  const color = d3.scaleSequential().domain([d3.min(cvals)||0, d3.max(cvals)||1]).interpolator(d3.interpolateOrRd);
+  const rectW = (w - margin.left - margin.right) / Math.max(agg.length,1);
+  agg.forEach((d,i)=>{
+      const rx = margin.left + i*rectW;
+      svgMap.append("rect")
+        .attr("x", rx)
+        .attr("y", margin.top/2)
+        .attr("width", rectW-6)
+        .attr("height", 60)
+        .attr("fill", color((d.Cases/d.Population)*100000))
+        .attr("class","map-rect")
+        .on("click", ()=>{ 
+            stateSelect.property("value", d.State);
+            renderCharts(d.State, d3.select("#timeSelect").property("value"));
+            console.log("Filtered by", d.State);
+        })
+        .on("mouseover", (event)=>{ tooltip.style("opacity",1).html(`<strong>${d.State}</strong><br/>Cases per 100k: ${((d.Cases/d.Population)*100000).toFixed(2)}`).style("left",(event.pageX+10)+"px").style("top",(event.pageY+10)+"px"); })
+        .on("mouseout", ()=>{ tooltip.style("opacity",0); });
+      svgMap.append("text").attr("x", rx + (rectW-6)/2).attr("y", margin.top/2 + 35).attr("text-anchor","middle").attr("fill","#000").text(d.State).style("font-size","11px");
+  });
+}
+
+// initial render
+renderCharts("All", "2020-07-01");
+
+// controls
+d3.select("#stateSelect").on("change", function(){ const v = this.value; const t = d3.select("#timeSelect").property("value"); renderCharts(v,t); });
+d3.select("#timeSelect").on("change", function(){ const t = this.value; const v = d3.select("#stateSelect").property("value"); renderCharts(v,t); });
+
+</script>
+</body>
+</html>
